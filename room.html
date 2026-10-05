@@ -1,0 +1,165 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="robots" content="noindex">
+<title>Message in a Bottle</title>
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🌊</text></svg>">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Caveat:wght@500;600&family=Fraunces:ital,opsz,wght@0,9..144,400;1,9..144,400&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<main>
+  <!-- Enter a code -->
+  <section id="join" class="hidden">
+    <h1>Message in a Bottle</h1>
+    <p class="sub">Enter the code your host shared.</p>
+    <div class="card">
+      <div class="field">
+        <label for="code">Round code</label>
+        <input id="code" type="text" autocomplete="off" autocapitalize="characters" maxlength="8">
+      </div>
+      <button id="joinBtn" class="wide" type="button">Join</button>
+      <p class="error" id="joinErr" role="alert"></p>
+    </div>
+  </section>
+
+  <!-- Write a note -->
+  <section id="write" class="hidden">
+    <h1>Message in a Bottle</h1>
+    <p class="sub">Before you go, toss one into the sea.</p>
+    <div class="card">
+      <div class="field">
+        <label for="email">Where should a bottle wash up for you?</label>
+        <input id="email" type="email" autocomplete="email" placeholder="you@txstate.edu">
+      </div>
+      <div class="field">
+        <label for="msg">Write something that could make someone's day. You won't know who finds it, and they won't know it was you.</label>
+        <p class="help">A compliment, some encouragement, or a reminder that they're doing better than they think. Make it the kind of message someone screenshots and keeps.</p>
+        <textarea id="msg" maxlength="2000"></textarea>
+        <div class="counter" id="counter" aria-live="polite"></div>
+      </div>
+      <button id="sendBtn" class="wide" type="button">Toss it in the sea</button>
+      <p class="error" id="sendErr" role="alert"></p>
+    </div>
+  </section>
+
+  <!-- Waiting -->
+  <section id="wait" class="hidden">
+    <h1>Your bottle is floating.</h1>
+    <p class="sub">Keep this page open. When your host releases the round, a bottle will wash up for you right here. It'll land in your inbox too.</p>
+    <svg class="big-bottle" viewBox="0 0 120 220" width="70" height="128" aria-hidden="true"><rect x="41" y="96" width="38" height="92" rx="7" fill="#f3e6c6"/><rect x="41" y="136" width="38" height="6" fill="#a7463a"/><path d="M45 40 L45 62 C45 72 20 80 20 100 L20 196 Q20 210 34 210 L86 210 Q100 210 100 196 L100 100 C100 80 75 72 75 62 L75 40 Z" fill="rgba(150,210,190,0.38)" stroke="rgba(225,248,240,0.85)" stroke-width="2.5"/><path d="M29 116 L29 186" stroke="rgba(255,255,255,.35)" stroke-width="5" stroke-linecap="round"/><rect x="41" y="34" width="38" height="9" rx="3" fill="rgba(190,230,215,.7)"/><rect x="46" y="12" width="28" height="26" rx="5" fill="#a9774a"/></svg>
+  </section>
+
+  <!-- Status messages -->
+  <section id="info" class="hidden">
+    <h1 id="infoTitle"></h1>
+    <p class="sub" id="infoText"></p>
+  </section>
+</main>
+
+<script src="config.js"></script>
+<script>
+  var MIN = 60;
+  var params = new URLSearchParams(location.search);
+  var code = (params.get("r") || "").trim().toUpperCase();
+  var ticketKey = function () { return "bottle_ticket_" + code; };
+  var pollTimer = null;
+
+  function show(id) {
+    ["join", "write", "wait", "info"].forEach(function (s) {
+      document.getElementById(s).classList.toggle("hidden", s !== id);
+    });
+  }
+  function info(title, text) {
+    document.getElementById("infoTitle").textContent = title;
+    document.getElementById("infoText").textContent = text;
+    show("info");
+  }
+
+  async function start() {
+    if (!code) { show("join"); return; }
+    var ticket = bottleStore.get(ticketKey());
+    if (ticket) { show("wait"); startPolling(ticket); return; }
+    try {
+      var r = await bottleApi("roomInfo", { code: code });
+      if (r.status === "open") show("write");
+      else if (r.status === "released") info("This round has sailed.", "The bottles from this round have already gone out.");
+      else info("No round here.", "That code doesn't match an open round. Double-check it with your host.");
+    } catch (e) {
+      info("Can't reach the sea right now.", e.message);
+    }
+  }
+
+  // Join by code
+  document.getElementById("joinBtn").addEventListener("click", function () {
+    var c = document.getElementById("code").value.trim().toUpperCase().replace(/[^A-Z0-9]/g, "");
+    if (!c) { document.getElementById("joinErr").textContent = "Enter a code."; return; }
+    location.search = "?r=" + encodeURIComponent(c);
+  });
+  document.getElementById("code").addEventListener("keydown", function (e) {
+    if (e.key === "Enter") document.getElementById("joinBtn").click();
+  });
+
+  // Character counter
+  var msg = document.getElementById("msg");
+  var counter = document.getElementById("counter");
+  function updateCounter() {
+    var n = msg.value.trim().length;
+    counter.textContent = n < MIN ? (MIN - n) + " more characters to go" : "Looks great";
+    counter.classList.toggle("ok", n >= MIN);
+  }
+  msg.addEventListener("input", updateCounter);
+  updateCounter();
+
+  // Submit
+  var sendBtn = document.getElementById("sendBtn");
+  sendBtn.addEventListener("click", async function () {
+    var err = document.getElementById("sendErr");
+    err.textContent = "";
+    var email = document.getElementById("email").value.trim();
+    var text = msg.value.trim();
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) { err.textContent = "Add an email so your bottle can find you."; return; }
+    if (text.length < MIN) { err.textContent = "Your note needs at least " + MIN + " characters."; return; }
+    sendBtn.disabled = true;
+    sendBtn.textContent = "Tossing...";
+    try {
+      var r = await bottleApi("submit", { code: code, email: email, message: text });
+      bottleStore.set(ticketKey(), r.ticket);
+      show("wait");
+      startPolling(r.ticket);
+    } catch (e) {
+      err.textContent = e.message;
+      sendBtn.disabled = false;
+      sendBtn.textContent = "Toss it in the sea";
+    }
+  });
+
+  // Wait for release
+  function startPolling(ticket) {
+    clearInterval(pollTimer);
+    var check = async function () {
+      try {
+        var r = await bottleApi("poll", { code: code, ticket: ticket });
+        if (r.status === "released") {
+          clearInterval(pollTimer);
+          if (r.link) { location.replace(r.link); }
+          else info("The bottles have gone out.", "Check your inbox for yours.");
+        } else if (r.status === "gone") {
+          clearInterval(pollTimer);
+          bottleStore.del(ticketKey());
+          info("This round has ended.", "If you tossed a bottle, yours is waiting in your inbox.");
+        }
+      } catch (e) { /* network blip: keep trying */ }
+    };
+    check();
+    pollTimer = setInterval(check, 5000);
+  }
+
+  start();
+</script>
+</body>
+</html>
